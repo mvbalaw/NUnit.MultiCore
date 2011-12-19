@@ -7,6 +7,9 @@
 // </summary>
 // --------------------------------------------------------------------------------------------------------------------
 
+using System.IO;
+using System.Linq;
+
 namespace NUNit.MultiCore.ConsoleTestRunner
 {
     using System;
@@ -14,66 +17,69 @@ namespace NUNit.MultiCore.ConsoleTestRunner
     using System.Diagnostics;
     using System.Reflection;
 
-    /// <summary>Defines the main console test runner.</summary>
-    [Serializable]
-    public class Program
-    {
-        /// <summary>Path to the assembly under test.</summary>
-        private static string assemblyPath;
+	/// <summary>Defines the main console test runner.</summary>
+	[Serializable]
+	public class Program
+	{
+		private const string SwitchInNewDomain = "/innewdomain";
 
-        /// <summary>File path to output xml to.</summary>
-        private static string outputXmlPath;
+		/// <summary>Path to the assembly under test.</summary>
+		private static List<string> assemblies = new List<string>();
 
-        /// <summary>Set to true if this assembly is running under a new domain.</summary>
-        private static bool newDomain;
+		/// <summary>File path to output xml to.</summary>
+		private static string outputXmlPath;
 
-        /// <summary>
-        /// Entry point of the application.
-        /// </summary>
-        /// <param name="args">The command line arguments that have been specified.</param>
-        public static void Main(string[] args)
-        {
-            Console.WriteLine("Startup");
+		/// <summary>Set to true if this assembly is running under a new domain.</summary>
+		private static bool newDomain;
 
-            var watch = Stopwatch.StartNew();
+		/// <summary>
+		/// Entry point of the application.
+		/// </summary>
+		/// <param name="args">The command line arguments that have been specified.</param>
+		public static void Main(string[] args)
+		{
+			var watch = Stopwatch.StartNew();
 
-            PopulateParameters(args);
+			PopulateParameters(args);
 
-            var fullAssemblyPath = assemblyPath;
+			var currentDirectory = Environment.CurrentDirectory;
 
-            Console.WriteLine(fullAssemblyPath);
+			// If we're not in the correct app domain, set up a new app domain to run in 
+			if (!newDomain)
+			{
+				foreach (var assembly in assemblies)
+				{
+					var fullAssemblyPath = Path.Combine(currentDirectory, assembly);
+					var setupInfo = new AppDomainSetup
+					                	{
+					                		ApplicationBase = Path.Combine(currentDirectory, Path.GetDirectoryName(assembly)),
+					                		PrivateBinPath = fullAssemblyPath,
+					                		ConfigurationFile = fullAssemblyPath + ".config",
+					                	};
 
-            // If we're not in the correct app domain, set up a new app domain to run in 
-            if (!newDomain)
-            {
-                var setupInfo = new AppDomainSetup
-                {
-                    ApplicationBase = System.IO.Path.GetDirectoryName(fullAssemblyPath),
-                    PrivateBinPath = System.IO.Path.GetDirectoryName(Assembly.GetExecutingAssembly().CodeBase),
-                    ConfigurationFile = fullAssemblyPath + ".config",
-                };
+					var domain = AppDomain.CreateDomain("ParallelTestsDomain", null, setupInfo);
 
-                var domain = AppDomain.CreateDomain("ParallelTestsDomain", null, setupInfo);
+					// Execute this program in the new application domain.  We HAVE to run in the 
+					// new domain so we'll have the correct app.config and all the tests will be running in 
+					// the correct context. 
+					var newArgs = new[] {SwitchInNewDomain, fullAssemblyPath, outputXmlPath != null ? "/xml " + outputXmlPath : ""};
+					domain.ExecuteAssembly(Assembly.GetExecutingAssembly().Location, newArgs);
+				}
+			}
+			else
+			{
+				var assemblyPath = assemblies.First();
+				Console.WriteLine("Running tests from {0}", assemblyPath);
 
-                var newArgs = new string[args.Length + 1];
-                args.CopyTo(newArgs, 0);
-                newArgs[newArgs.Length - 1] = "/innewdomain";
+				// as we're running in the correct domain, just run the tests. 
+				var runner = new Runner();
+				runner.RunTests(assemblyPath, outputXmlPath);
 
-                // Execute this program in the new application domain.  We HAVE to run in the 
-                // new domain so we'll have the correct app.config and all the tests will be running in 
-                // the correct context. 
-                domain.ExecuteAssembly(Assembly.GetExecutingAssembly().CodeBase, newArgs);
-            }
-            else
-            {
-                Console.WriteLine("Running tests from {0}", fullAssemblyPath);
+				Console.WriteLine("Completed tests in: {0}", watch.Elapsed);
+			}
+		}
+	
 
-                // as we're running in the correct domain, just run the tests. 
-                new Runner().RunTests(fullAssemblyPath, outputXmlPath);
-
-                Console.WriteLine("Completed tests in: {0}", watch.Elapsed);
-            }
-        }
 
         /// <summary>
         /// Populates the setup variables with the arguments supplied.
@@ -81,8 +87,6 @@ namespace NUNit.MultiCore.ConsoleTestRunner
         /// <param name="args">The command line arguments that have been supplied.</param>
         private static void PopulateParameters(IEnumerable<string> args)
         {
-            Console.WriteLine("Populating parameters");
-
             bool nextIsXmlPath = false;
 
             foreach (var arg in args)
@@ -92,7 +96,7 @@ namespace NUNit.MultiCore.ConsoleTestRunner
                     case "/xml":
                         nextIsXmlPath = true;
                         break;
-                    case "/innewdomain":
+                    case SwitchInNewDomain:
                         newDomain = true;
                         break;
                     default:
@@ -103,12 +107,12 @@ namespace NUNit.MultiCore.ConsoleTestRunner
                         else if (nextIsXmlPath)
                         {
                             outputXmlPath = System.IO.Directory.GetCurrentDirectory() + @"\" + arg;
-                            nextIsXmlPath = false;
+							nextIsXmlPath = false;
                         }
                         else
                         {
-                                assemblyPath = arg;
-                        }
+                            assemblies.Add(arg);
+						}
 
                         break;
                 }
