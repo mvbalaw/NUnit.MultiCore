@@ -15,8 +15,8 @@ namespace NUnit.MultiCore.TestRunner
     using System.Reflection;
     using System.Threading;
 
-    using NUnit.Core;
-    using NUnit.MultiCore.Interfaces;
+    using Core;
+    using Interfaces;
 
     /// <summary>
     /// Class used to run tests within an assembly in parallel.
@@ -176,7 +176,7 @@ namespace NUnit.MultiCore.TestRunner
                     if (callingType != type && TestFixtureBuilder.CanBuildFrom(type))
                     {
                         Test newFixture = TestFixtureBuilder.BuildFrom(type);
-
+						
                         if (IsParallelTest(newFixture.FixtureType))
                         {
                             concurrentTestFixtures.Enqueue(newFixture);
@@ -247,7 +247,8 @@ namespace NUnit.MultiCore.TestRunner
                                                 select result;
 
             // Report the errors if there are any 
-            if (failuresAndErrors.Count() > 0)
+			Console.WriteLine();
+            if (failuresAndErrors.Any())
             {
                 foreach (TestResult failure in failuresAndErrors)
                 {
@@ -344,7 +345,7 @@ namespace NUnit.MultiCore.TestRunner
             /// </param>
             public void RunFinished(Exception exception)
             {
-            }
+			}
 
             /// <summary>
             /// Called when a run is finished with a result.
@@ -398,6 +399,7 @@ namespace NUnit.MultiCore.TestRunner
             /// </param>
             public void TestFinished(TestResult result)
             {
+				Console.Write(result.IsFailure ? "F" : ".");
             }
 
             /// <summary>
@@ -496,9 +498,18 @@ namespace NUnit.MultiCore.TestRunner
             /// </returns>
             public bool Match(ITest test)
             {
-                if (test.RunState == RunState.Ignored)
+            	if (test.RunState == RunState.Ignored ||
+					test.Parent.RunState == RunState.Ignored)
                 {
+					Console.Write("I");
                     this.listener.IncreaseSkipped();
+                    return false;
+                }
+            	if (test.RunState == RunState.Explicit ||
+					test.Parent.RunState == RunState.Explicit)
+                {
+					Console.Write("X");
+					this.listener.IncreaseSkipped();
                     return false;
                 }
 
