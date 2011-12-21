@@ -8,6 +8,8 @@
 // </summary>
 // --------------------------------------------------------------------------------------------------------------------
 
+using System.Linq;
+
 namespace NUNit.MultiCore.ConsoleTestRunner
 {
     using System.Reflection;
@@ -28,12 +30,14 @@ namespace NUNit.MultiCore.ConsoleTestRunner
         /// </summary>
         /// <param name="fullAssemblyPath">The full assembly path.</param>
         /// <param name="outputXmlPath">The output xml path.</param>
-        public void RunTests(string fullAssemblyPath, string outputXmlPath)
+        /// <returns>False if any tests failed or any errors occurred, otherwise true</returns>
+        public bool RunTests(string fullAssemblyPath, string outputXmlPath)
         {
             var assemblyToTest = Assembly.LoadFrom(fullAssemblyPath);
 
             var results = new ParallelTestRunner().RunTestsInParallel(assemblyToTest);
             SaveXmlOutput(results, outputXmlPath);
+        	return !results.Results.Cast<TestResult>().Any(x => x.IsFailure || x.IsError);
         }
 
         /// <summary>

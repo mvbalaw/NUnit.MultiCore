@@ -36,7 +36,7 @@ namespace NUNit.MultiCore.ConsoleTestRunner
 		/// Entry point of the application.
 		/// </summary>
 		/// <param name="args">The command line arguments that have been specified.</param>
-		public static void Main(string[] args)
+		public static int Main(string[] args)
 		{
 			var watch = Stopwatch.StartNew();
 
@@ -47,6 +47,7 @@ namespace NUNit.MultiCore.ConsoleTestRunner
 			// If we're not in the correct app domain, set up a new app domain to run in 
 			if (!newDomain)
 			{
+				int result = 0;
 				foreach (var assembly in assemblies)
 				{
 					var fullAssemblyPath = Path.Combine(currentDirectory, assembly);
@@ -63,8 +64,9 @@ namespace NUNit.MultiCore.ConsoleTestRunner
 					// new domain so we'll have the correct app.config and all the tests will be running in 
 					// the correct context. 
 					var newArgs = new[] {SwitchInNewDomain, fullAssemblyPath, outputXmlPath != null ? "/xml " + outputXmlPath : ""};
-					domain.ExecuteAssembly(Assembly.GetExecutingAssembly().Location, newArgs);
+					result |= domain.ExecuteAssembly(Assembly.GetExecutingAssembly().Location, newArgs);
 				}
+				return result;
 			}
 			else
 			{
@@ -73,9 +75,10 @@ namespace NUNit.MultiCore.ConsoleTestRunner
 
 				// as we're running in the correct domain, just run the tests. 
 				var runner = new Runner();
-				runner.RunTests(assemblyPath, outputXmlPath);
+				bool noErrors = runner.RunTests(assemblyPath, outputXmlPath);
 
 				Console.WriteLine("Completed tests in: {0}", watch.Elapsed);
+				return noErrors ? 0 : 1;
 			}
 		}
 	
