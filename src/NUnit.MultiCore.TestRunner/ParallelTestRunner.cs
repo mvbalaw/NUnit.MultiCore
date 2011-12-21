@@ -4,6 +4,8 @@
 // </copyright>
 // --------------------------------------------------------------------------------------------------------------------
 
+using System.Threading.Tasks;
+
 namespace NUnit.MultiCore.TestRunner
 {
     using System;
@@ -138,8 +140,8 @@ namespace NUnit.MultiCore.TestRunner
 
                     if (nextTest != null)
                     {
-                        TestContext.Save();
-                        nextTest.Run(this.Listener, this.Filter);
+						TestContext.Save();
+						nextTest.Run(this.Listener, this.Filter);
                     }
                 }
             }
@@ -166,27 +168,14 @@ namespace NUnit.MultiCore.TestRunner
             this.Listener = new ParallelListener();
             this.Filter = new IgnoreFilter(this.Listener);
 
-            var concurrentTestFixtures = new Queue<Test>();
-            var nonConcurrentTestFixtures = new List<Test>();
+            List<Test> concurrentTestFixtures;
 
             try
             {
-                foreach (var type in assemblyToTest.GetTypes())
-                {
-                    if (callingType != type && TestFixtureBuilder.CanBuildFrom(type))
-                    {
-                        Test newFixture = TestFixtureBuilder.BuildFrom(type);
-						
-                        if (IsParallelTest(newFixture.FixtureType))
-                        {
-                            concurrentTestFixtures.Enqueue(newFixture);
-                        }
-                        else
-                        {
-                            nonConcurrentTestFixtures.Add(newFixture);
-                        }
-                    }
-                }
+            	concurrentTestFixtures = assemblyToTest.GetTypes()
+            		.Where(type => callingType != type && TestFixtureBuilder.CanBuildFrom(type))
+            		.Select(TestFixtureBuilder.BuildFrom)
+            		.ToList();
             }
             catch (ReflectionTypeLoadException ex)
             {
@@ -206,67 +195,63 @@ namespace NUnit.MultiCore.TestRunner
                 throw;
             }
 
-            var threads = new List<Thread>();
+        	var stopwatch = new Stopwatch();
+			stopwatch.Start();
 
-            // Start up threads to run the concurrent fixtures 
-            // Note: We start up twice the number of threads as there are processors
-            // This is because ad-hoc testing has shown this to give a better speed increase.
-            for (int i = 0; i < Environment.ProcessorCount << 1; ++i)
-            {
-                var ts = new ParameterizedThreadStart(this.RunTestsInQueue);
-                var t = new Thread(ts);
+			var currentDirectory = Path.GetDirectoryName(assemblyToTest.Location);
+			Parallel.ForEach(concurrentTestFixtures, testFixture =>
+        		{
+					Environment.CurrentDirectory = currentDirectory;
 
-                t.Start(concurrentTestFixtures);
+					TestContext.Save();
+					testFixture.Run(this.Listener, this.Filter);
+        		});
 
-                threads.Add(t);
-            }
-
-            // Wait for all of the concurrent tests to finish 
-            foreach (var thread in threads)
-            {
-                thread.Join();
-            }
-
-            // Run the non-concurrent tests 
-            foreach (var test in nonConcurrentTestFixtures)
-            {
-                TestContext.Save();
-                test.Run(this.Listener, this.Filter);
-            }
+			stopwatch.Stop();
 
             // Find out what the failures were 
-            IEnumerable<TestResult> failuresAndErrors = from result in this.AllResults(this.Listener.Results)
-                                                        where
-                                                            (result.IsFailure || result.IsError) &&
-                                                            (result.Results == null)
-                                                        select result;
+			var testResults = this.AllResults(this.Listener.Results)
+				.Where(x => x.Results == null)
+				.ToList();
 
-            // Find out was the successes were 
-            IEnumerable<TestResult> successes = from result in this.AllResults(this.Listener.Results)
-                                                where result.IsSuccess && (result.Results == null)
-                                                select result;
+			var failuresAndErrors = testResults
+				.Where(result => (result.IsFailure || result.IsError))
+				.ToList();
 
-            // Report the errors if there are any 
+			// Report the errors if there are any 
 			Console.WriteLine();
-            if (failuresAndErrors.Any())
-            {
-                foreach (TestResult failure in failuresAndErrors)
-                {
-                    Console.WriteLine("------------------------------------------------");
-                    Console.WriteLine(failure.Test.TestName + " failed");
-                    Console.WriteLine(failure.Message);
-                    Console.WriteLine(failure.StackTrace);
-                }
-            }
+			foreach (TestResult failure in failuresAndErrors)
+			{
+				Console.WriteLine("------------------------------------------------");
+				Console.WriteLine(failure.Test.TestName + " failed");
+				Console.WriteLine(failure.Message);
+				Console.WriteLine(failure.StackTrace);
+			}
 
-            Console.WriteLine("=================================================");
-            Console.WriteLine(
-                string.Format(
-                    "ParallelTestRunner finished: {0} passed, {1} failed, {2} skipped.", 
-                    successes.Count(), 
-                    failuresAndErrors.Count(), 
-                    this.Listener.Skipped));
-            Console.WriteLine("=================================================");
+			Console.WriteLine("=================================================");
+			var totalErrors = testResults.Count(x => x.IsError);
+			var totalFailures = testResults.Count(x => x.IsFailure);
+			var totalInconclusive = testResults.Count(x => x.ResultState == ResultState.Inconclusive);
+			var totalIgnored = testResults.Count(x => x.ResultState == ResultState.Ignored);
+			var totalSkipped = testResults.Count(x => x.ResultState == ResultState.Skipped);
+			var totalNotRunnable = testResults.Count(x => x.ResultState == ResultState.NotRunnable);
+			var totalNotRun = totalInconclusive + totalIgnored + totalSkipped + totalNotRunnable;
+			var totalRun = testResults.Count - totalNotRun;
+
+			Console.WriteLine(
+			String.Format("Tests run: {0}, Errors: {1}, Failures: {2}, Inconclusive: {3}, Time: {4} seconds",
+						totalRun,
+						totalErrors,
+						totalFailures,
+						totalInconclusive,
+						stopwatch.Elapsed.TotalSeconds));
+
+			Console.WriteLine(String.Format("  Not run: {0}, Invalid: {1}, Ignored: {2}, Skipped: {3}",
+				totalNotRun,
+				failuresAndErrors.Count,
+				totalIgnored,
+				totalSkipped));
+			Console.WriteLine("=================================================");
 
             // Build up the results for return 
             var finalResult = new TestResult(new TestName());
@@ -399,7 +384,7 @@ namespace NUnit.MultiCore.TestRunner
             /// </param>
             public void TestFinished(TestResult result)
             {
-				Console.Write(result.IsFailure ? "F" : ".");
+				Console.Write(result.IsFailure || result.IsError ? 'F' : '.');
             }
 
             /// <summary>
