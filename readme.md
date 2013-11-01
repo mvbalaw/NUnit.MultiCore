@@ -7,3 +7,5 @@ Usage:
 all TestFixtures in your assemblies will be run in parallel by default.
 
 forked on 19 Dec 2011 from http://nunitmulticore.codeplex.com/SourceControl/list/changesets most recent build (1250)
+
+If you have questions or comments about this project, please contact us at <mailto:opensource@mvbalaw.com>
